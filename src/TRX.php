@@ -18,10 +18,10 @@ class TRX implements WalletInterface
     {
         $this->_api = $_api;
 
-        $host = $_api->getClient()->getConfig('base_uri')->getScheme() . '://' . $_api->getClient()->getConfig('base_uri')->getHost();
-        $fullNode = new HttpProvider($host);
+        $host         = $_api->getClient()->getConfig('base_uri')->getScheme() . '://' . $_api->getClient()->getConfig('base_uri')->getHost();
+        $fullNode     = new HttpProvider($host);
         $solidityNode = new HttpProvider($host);
-        $eventServer = new HttpProvider($host);
+        $eventServer  = new HttpProvider($host);
         try {
             $this->tron = new Tron($fullNode, $solidityNode, $eventServer);
         } catch (TronException $e) {
@@ -31,7 +31,7 @@ class TRX implements WalletInterface
 
     public function generateAddress(): Address
     {
-        $attempts = 0;
+        $attempts     = 0;
         $validAddress = false;
 
         do {
@@ -39,17 +39,17 @@ class TRX implements WalletInterface
                 throw new TronErrorException('Could not generate valid key');
             }
 
-            $key = new Key([
-                'private_key_hex' => '',
-                'private_key_dec' => '',
-                'public_key' => '',
+            $key           = new Key([
+                'private_key_hex'       => '',
+                'private_key_dec'       => '',
+                'public_key'            => '',
                 'public_key_compressed' => '',
-                'public_key_x' => '',
-                'public_key_y' => ''
+                'public_key_x'          => '',
+                'public_key_y'          => ''
             ]);
-            $keyPair = $key->GenerateKeypair();
+            $keyPair       = $key->GenerateKeypair();
             $privateKeyHex = $keyPair['private_key_hex'];
-            $pubKeyHex = $keyPair['public_key'];
+            $pubKeyHex     = $keyPair['public_key'];
 
             //We cant use hex2bin unless the string length is even.
             if (strlen($pubKeyHex) % 2 !== 0) {
@@ -57,12 +57,12 @@ class TRX implements WalletInterface
             }
 
             try {
-                $addressHex = Address::ADDRESS_PREFIX . SupportKey::publicKeyToAddress($pubKeyHex);
+                $addressHex    = Address::ADDRESS_PREFIX . SupportKey::publicKeyToAddress($pubKeyHex);
                 $addressBase58 = SupportKey::getBase58CheckAddress($addressHex);
             } catch (InvalidArgumentException $e) {
                 throw new TronErrorException($e->getMessage());
             }
-            $address = new Address($addressBase58, $privateKeyHex, $addressHex);
+            $address      = new Address($addressBase58, $privateKeyHex, $addressHex);
             $validAddress = $this->validateAddress($address);
         } while (!$validAddress);
 
@@ -85,12 +85,12 @@ class TRX implements WalletInterface
     public function privateKeyToAddress(string $privateKeyHex): Address
     {
         try {
-            $addressHex = Address::ADDRESS_PREFIX . SupportKey::privateKeyToAddress($privateKeyHex);
+            $addressHex    = Address::ADDRESS_PREFIX . SupportKey::privateKeyToAddress($privateKeyHex);
             $addressBase58 = SupportKey::getBase58CheckAddress($addressHex);
         } catch (InvalidArgumentException $e) {
             throw new TronErrorException($e->getMessage());
         }
-        $address = new Address($addressBase58, $privateKeyHex, $addressHex);
+        $address      = new Address($addressBase58, $privateKeyHex, $addressHex);
         $validAddress = $this->validateAddress($address);
         if (!$validAddress) {
             throw new TronErrorException('Invalid private key');
@@ -109,25 +109,39 @@ class TRX implements WalletInterface
     {
         $this->tron->setAddress($from->address);
         $this->tron->setPrivateKey($from->privateKey);
-
         try {
-            $transaction = $this->tron->getTransactionBuilder()->sendTrx($to->address, $amount, $from->address);
+            $transaction       = $this->tron->getTransactionBuilder()->sendTrx($to->address, $amount, $from->address);
             $signedTransaction = $this->tron->signTransaction($transaction);
-            $response = $this->tron->sendRawTransaction($signedTransaction);
+            usleep(500000);
+            $backoff           = [1, 3, 6];
+            foreach ($backoff as $sleep) {
+                try {
+                    $response = $this->tron->sendRawTransaction($signedTransaction);
+                    if (isset($response['result']) && $response['result'] == true) {
+                        return new Transaction(
+                            $transaction['txID'],
+                            $transaction['raw_data'],
+                            'PACKING'
+                        );
+                    }
+
+                    // 节点明确拒绝（不是 429）
+                    throw new TransactionException(
+                        isset($response['message']) ? hex2bin($response['message']) : 'broadcast failed'
+                    );
+                } catch (TronException $e) {
+                    if ($e->getMessage() !== '' && (strpos($e->getMessage(), '429') !== false || strpos($e->getMessage(), 'Too Many Requests') !== false)) {
+                        sleep($sleep);
+                        continue;
+                    }
+                    throw new TransactionException($e->getMessage(), $e->getCode());
+                }
+            }
         } catch (TronException $e) {
             throw new TransactionException($e->getMessage(), $e->getCode());
         }
-
-        if (isset($response['result']) && $response['result'] == true) {
-            return new Transaction(
-                $transaction['txID'],
-                $transaction['raw_data'],
-                'PACKING'
-            );
-        } else {
-            throw new TransactionException(hex2bin($response['message']));
-        }
     }
+
 
     public function blockNumber(): Block
     {

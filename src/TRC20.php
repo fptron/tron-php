@@ -64,30 +64,42 @@ class TRC20 extends TRX
             'contract_address' => $this->contractAddress->hexAddress,
             'function_selector' => 'transfer(address,uint256)',
             'parameter' => "{$toFormat}{$numberFormat}",
-            'fee_limit' => 100000000,
+            'fee_limit' => 30000000,
             'call_value' => 0,
             'owner_address' => $from->hexAddress,
         ], true);
-
         if (isset($body['result']['code'])) {
             throw new TransactionException(hex2bin($body['result']['message']));
         }
-
         try {
             $tradeobj = $this->tron->signTransaction($body['transaction']);
-            $response = $this->tron->sendRawTransaction($tradeobj);
+            usleep(500000); // 0.7 秒
+            $backoff           = [2, 4, 6];
+            foreach ($backoff as $sleep) {
+                try {
+                    $response = $this->tron->sendRawTransaction($tradeobj);
+                    if (isset($response['result']) && $response['result'] == true) {
+                        return new Transaction(
+                            $body['transaction']['txID'],
+                            $body['transaction']['raw_data'],
+                            'PACKING'
+                        );
+                    } else {
+                        throw new TransactionException('Transfer Fail');
+                    }
+                } catch (TronException $e) {
+                    if ($e->getMessage() !== '' && (strpos($e->getMessage(), '429') !== false || strpos($e->getMessage(), 'Too Many Requests') !== false)) {
+                        sleep($sleep);
+                        continue;
+                    }
+                    throw new TransactionException($e->getMessage(), $e->getCode());
+                }
+            }
         } catch (TronException $e) {
             throw new TransactionException($e->getMessage(), $e->getCode());
         }
 
-        if (isset($response['result']) && $response['result'] == true) {
-            return new Transaction(
-                $body['transaction']['txID'],
-                $body['transaction']['raw_data'],
-                'PACKING'
-            );
-        } else {
-            throw new TransactionException('Transfer Fail');
-        }
+
     }
+
 }
