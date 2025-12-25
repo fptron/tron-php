@@ -27,14 +27,23 @@ class Formatter
      */
     public static function toAddressFormat($address)
     {
-        if (Utils::isAddress($address)) {
-            $address = strtolower($address);
-
-            if (Utils::isZeroPrefixed($address)) {
-                $address = Utils::stripZero($address);
-            }
+        $address = strtolower(trim($address));
+        // 去掉 0x 前缀（EVM 风格）
+        if (strpos($address, '0x') === 0) {
+            $address = substr($address, 2);
         }
-        return implode('', array_fill(0, 64 - strlen($address), 0)) . $address;
+        // TRON hex address: 41 + 20 bytes
+        if (preg_match('/^41[a-f0-9]{40}$/', $address)) {
+            $address = substr($address, 2);
+        }
+        // 最终强校验：address 必须是 20 bytes
+        if (!preg_match('/^[a-f0-9]{40}$/', $address)) {
+            throw new \InvalidArgumentException(
+                'Invalid TRC20 address format, expect 20-byte hex'
+            );
+        }
+        // ABI address 左补 0 到 32 bytes
+        return str_pad($address, 64, '0', STR_PAD_LEFT);
     }
 
     /**
@@ -47,11 +56,10 @@ class Formatter
     {
         $bn = Utils::toBn($value);
         $bnHex = $bn->toHex(true);
-        $padded = mb_substr($bnHex, 0, 1);
 
-        if ($padded !== 'f') {
-            $padded = '0';
+        if (mb_strlen($bnHex) > $digit) {
+            throw new \InvalidArgumentException('Integer hex overflow');
         }
-        return implode('', array_fill(0, $digit - mb_strlen($bnHex), $padded)) . $bnHex;
+        return str_pad($bnHex, $digit, '0', STR_PAD_LEFT);
     }
 }
