@@ -112,7 +112,7 @@ class TRX implements WalletInterface
         try {
             $transaction       = $this->tron->getTransactionBuilder()->sendTrx($to->address, $amount, $from->address);
             $signedTransaction = $this->tron->signTransaction($transaction);
-            usleep(500000);
+            usleep(1000000);
             $backoff           = [1, 3, 6];
             foreach ($backoff as $sleep) {
                 try {
@@ -123,12 +123,14 @@ class TRX implements WalletInterface
                             $transaction['raw_data'],
                             'PACKING'
                         );
+                    } elseif ($response['message'] !== '' && (strpos($response['message'], '429') !== false || strpos($response['message'], 'Too Many Requests') !== false)) {
+                        sleep($sleep);
+                        continue;
+                    } else {
+                        throw new TransactionException(
+                            isset($response['message']) ? hex2bin($response['message']) : 'broadcast failed'
+                        );
                     }
-
-                    // 节点明确拒绝（不是 429）
-                    throw new TransactionException(
-                        isset($response['message']) ? hex2bin($response['message']) : 'broadcast failed'
-                    );
                 } catch (TronException $e) {
                     if ($e->getMessage() !== '' && (strpos($e->getMessage(), '429') !== false || strpos($e->getMessage(), 'Too Many Requests') !== false)) {
                         sleep($sleep);

@@ -73,8 +73,8 @@ class TRC20 extends TRX
         }
         try {
             $tradeobj = $this->tron->signTransaction($body['transaction']);
-            usleep(500000); // 0.7 秒
-            $backoff           = [2, 4, 6];
+            usleep(1000000); // 0.7 秒
+            $backoff           = [2, 4, 7];
             foreach ($backoff as $sleep) {
                 try {
                     $response = $this->tron->sendRawTransaction($tradeobj);
@@ -84,8 +84,13 @@ class TRC20 extends TRX
                             $body['transaction']['raw_data'],
                             'PACKING'
                         );
+                    } elseif ($response['message'] !== '' && (strpos($response['message'], '429') !== false || strpos($response['message'], 'Too Many Requests') !== false)) {
+                        sleep($sleep);
+                        continue;
                     } else {
-                        throw new TransactionException('Transfer Fail');
+                        throw new TransactionException(
+                            isset($response['message']) ? hex2bin($response['message']) : 'Transfer Fail'
+                        );
                     }
                 } catch (TronException $e) {
                     if ($e->getMessage() !== '' && (strpos($e->getMessage(), '429') !== false || strpos($e->getMessage(), 'Too Many Requests') !== false)) {
@@ -98,8 +103,6 @@ class TRC20 extends TRX
         } catch (TronException $e) {
             throw new TransactionException($e->getMessage(), $e->getCode());
         }
-
-
     }
 
 }
